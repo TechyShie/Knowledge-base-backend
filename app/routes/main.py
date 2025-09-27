@@ -32,6 +32,7 @@ def home():
         'version': '1.0'
     })
 
+
 @main_bp.route('/setup-database', methods=['POST'])
 def setup_database():
     """One-time database setup route"""
@@ -39,12 +40,26 @@ def setup_database():
         from app import db
         from app.models import User
         
-        # Create all tables
+        print("🔄 Creating database tables...")
         db.create_all()
+        print("✅ Tables created")
         
-        # Seed data
-        from seed import seed_database
-        seed_database()
+        # Check if already seeded
+        if User.query.first() is not None:
+            return jsonify({'message': 'Database already contains data'}), 200
+        
+        print("🔄 Seeding data...")
+        # Add your seeding logic here or import from seed.py
+        # For now, just create a test user
+        from werkzeug.security import generate_password_hash
+        user = User(
+            username="admin", 
+            email="admin@example.com", 
+            password_hash=generate_password_hash("password123"),
+            role="admin"
+        )
+        db.session.add(user)
+        db.session.commit()
         
         return jsonify({
             'message': 'Database setup completed successfully',
