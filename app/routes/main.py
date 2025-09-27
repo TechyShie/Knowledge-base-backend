@@ -31,3 +31,26 @@ def home():
         },
         'version': '1.0'
     })
+
+@main_bp.route('/setup-database', methods=['POST'])
+def setup_database():
+    """One-time database setup route"""
+    try:
+        from app import db
+        from app.models import User
+        
+        # Create all tables
+        db.create_all()
+        
+        # Seed data
+        from seed import seed_database
+        seed_database()
+        
+        return jsonify({
+            'message': 'Database setup completed successfully',
+            'tables_created': True,
+            'data_seeded': True
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
