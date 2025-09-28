@@ -1,15 +1,16 @@
+# app/__init__.py
 import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager  # NEW
-from datetime import timedelta  # NEW
+# from flask_jwt_extended import JWTManager  # COMMENT OUT FOR NOW
+from datetime import timedelta
 
 # Initialize extensions
 db = SQLAlchemy()
 migrate = Migrate()
-jwt = JWTManager()  # NEW
+# jwt = JWTManager()  # COMMENT OUT FOR NOW
 
 def create_app():
     app = Flask(__name__)
@@ -21,8 +22,8 @@ def create_app():
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///knowledge_base.db'
     
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-super-secret-jwt-key-change-in-production')  # NEW
-    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)  # NEW
+    # app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-secret-key')  # COMMENT OUT
+    # app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)  # COMMENT OUT
     
     # ✅ CORS Configuration
     CORS(app, resources={
@@ -43,7 +44,7 @@ def create_app():
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
-    jwt.init_app(app)  # NEW
+    # jwt.init_app(app)  # COMMENT OUT
     
     # Register blueprints
     from app.routes.articles import articles_bp

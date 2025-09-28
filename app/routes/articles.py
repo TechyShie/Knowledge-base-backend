@@ -16,6 +16,7 @@ def get_articles():
         category_id = request.args.get('category_id', type=int)
         tag_id = request.args.get('tag_id', type=int)
         author_id = request.args.get('author_id', type=int)
+        search = request.args.get('search', type=str)
         
         # Base query
         query = Article.query
@@ -27,26 +28,36 @@ def get_articles():
             query = query.filter(Article.author_id == author_id)
         if tag_id:
             query = query.join(Article.tags).filter(Tag.id == tag_id)
+        if search:
+            query = query.filter(
+                db.or_(
+                    Article.title.ilike(f'%{search}%'),
+                    Article.content.ilike(f'%{search}%')
+                )
+            )
         
         # Get paginated results
         articles = query.order_by(Article.created_at.desc()).paginate(
             page=page, per_page=per_page, error_out=False
         )
         
-        # Build response
+        # Build response - UPDATED to match frontend expectations
         articles_data = []
         for article in articles.items:
             article_data = {
                 'id': article.id,
                 'title': article.title,
-                'excerpt': article.content[:100] + '...' if len(article.content) > 100 else article.content,
+                'excerpt': article.content[:150] + '...' if len(article.content) > 150 else article.content,
+                'content': article.content,  # Include full content for detail view
                 'author': {
                     'id': article.author.id,
-                    'username': article.author.username
+                    'username': article.author.username,
+                    'email': article.author.email
                 },
                 'category': {
                     'id': article.category.id,
-                    'name': article.category.name
+                    'name': article.category.name,
+                    'description': article.category.description
                 },
                 'tags': [{'id': tag.id, 'name': tag.name} for tag in article.tags],
                 'created_at': article.created_at.isoformat(),

@@ -1,115 +1,293 @@
-# seed.py
-from app import create_app, db
-from app.models import User, Category, Article, Tag, ArticleTag, Feedback
+# seed_standalone.py
+import os
+import sys
 from datetime import datetime
 
-app = create_app()
+# Add the current directory to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-with app.app_context():
-    # ⚠️ Drop + recreate = nukes all data (only for dev/test)
-    db.drop_all()
-    db.create_all()
+# Set database URI before importing Flask app
+os.environ['DATABASE_URL'] = 'sqlite:///knowledge_base.db'
 
-    # --- Users ---
-    user1 = User(username="alice", email="alice@example.com", password_hash="hashed_pw1", role="admin")
-    user2 = User(username="bob", email="bob@example.com", password_hash="hashed_pw2", role="editor")
-    user3 = User(username="charlie", email="charlie@example.com", password_hash="hashed_pw3", role="viewer")
+# Now import Flask and SQLAlchemy directly
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash
 
-    # --- Categories ---
-    cat1 = Category(name="Python", description="All about Python programming")
-    cat2 = Category(name="Flask", description="Guides and tutorials on Flask framework")
-    cat3 = Category(name="Database", description="Database management and ORM")
+# Create a minimal Flask app just for seeding
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///knowledge_base.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-    # Add users and categories first to get IDs
-    db.session.add_all([user1, user2, user3, cat1, cat2, cat3])
-    db.session.commit()
+# Initialize SQLAlchemy
+db = SQLAlchemy(app)
 
-    # --- Articles ---
-    art1 = Article(
-        title="Getting Started with Python",
-        content="Python is a versatile programming language...",
-        author_id=user1.id,
-        category_id=cat1.id
-    )
+# Define models directly in this file (copy from your models.py but simplified)
+class User(db.Model):
+    __tablename__ = "users"
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    firebase_uid = db.Column(db.String(128), unique=True, nullable=True)
+    role = db.Column(db.String(20), default="employee")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    art2 = Article(
-        title="Flask for Beginners",
-        content="Flask is a lightweight WSGI web application framework...",
-        author_id=user2.id,
-        category_id=cat2.id
-    )
+class Category(db.Model):
+    __tablename__ = "categories"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    description = db.Column(db.String(255))
 
-    art3 = Article(
-        title="SQLAlchemy Basics",
-        content="SQLAlchemy is a powerful ORM for Python...",
-        author_id=user1.id,
-        category_id=cat3.id
-    )
+class Article(db.Model):
+    __tablename__ = "articles"
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    author_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey("categories.id"), nullable=False)
 
-    db.session.add_all([art1, art2, art3])
-    db.session.commit()
+class Tag(db.Model):
+    __tablename__ = "tags"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # --- Tags ---
-    tag1 = Tag(name="beginner")
-    tag2 = Tag(name="advanced")
-    tag3 = Tag(name="tutorial")
-    tag4 = Tag(name="database")
-    tag5 = Tag(name="web")
-    tag6 = Tag(name="orm")
+class ArticleTag(db.Model):
+    __tablename__ = "article_tags"
+    id = db.Column(db.Integer, primary_key=True)
+    article_id = db.Column(db.Integer, db.ForeignKey("articles.id", ondelete="CASCADE"), nullable=False)
+    tag_id = db.Column(db.Integer, db.ForeignKey("tags.id", ondelete="CASCADE"), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    db.session.add_all([tag1, tag2, tag3, tag4, tag5, tag6])
-    db.session.commit()
+class Feedback(db.Model):
+    __tablename__ = "feedback"
+    id = db.Column(db.Integer, primary_key=True)
+    article_id = db.Column(db.Integer, db.ForeignKey("articles.id", ondelete="CASCADE"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    helpfulness_score = db.Column(db.Integer, nullable=False)
+    comment = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # --- Article-Tag Relationships (SIMPLIFIED approach) ---
-    # Instead of using constructors, assign directly using IDs
-    relationships = [
-        ArticleTag(article_id=art1.id, tag_id=tag1.id),
-        ArticleTag(article_id=art1.id, tag_id=tag3.id),
-        ArticleTag(article_id=art2.id, tag_id=tag1.id),
-        ArticleTag(article_id=art2.id, tag_id=tag3.id),
-        ArticleTag(article_id=art2.id, tag_id=tag5.id),
-        ArticleTag(article_id=art3.id, tag_id=tag4.id),
-        ArticleTag(article_id=art3.id, tag_id=tag6.id),
-        ArticleTag(article_id=art3.id, tag_id=tag2.id)
-    ]
+def seed_database():
+    with app.app_context():
+        # ⚠️ Drop + recreate = nukes all data (only for dev/test)
+        print("🔄 Creating database tables...")
+        db.drop_all()
+        db.create_all()
 
-    # --- Feedback ---
-    feedback_entries = [
-        Feedback(
-            article_id=art1.id,
-            user_id=user3.id,
-            helpfulness_score=5,
-            comment="Very helpful for beginners!"
-        ),
-        Feedback(
-            article_id=art1.id,
-            user_id=None,  # Anonymous feedback
-            helpfulness_score=4,
-            comment="Good introduction"
-        ),
-        Feedback(
-            article_id=art2.id,
-            user_id=user3.id,
-            helpfulness_score=3,
-            comment="Could use more examples"
+        # --- Users ---
+        print("👥 Creating users...")
+        user1 = User(
+            username="alice_dev", 
+            email="alice@company.com", 
+            password_hash=generate_password_hash("password123"),
+            role="admin"
         )
-    ]
+        user2 = User(
+            username="bob_engineer", 
+            email="bob@company.com", 
+            password_hash=generate_password_hash("password123"),
+            role="editor"
+        )
+        user3 = User(
+            username="charlie_hr", 
+            email="charlie@company.com", 
+            password_hash=generate_password_hash("password123"),
+            role="employee"
+        )
+        user4 = User(
+            username="diana_marketing", 
+            email="diana@company.com", 
+            password_hash=generate_password_hash("password123"),
+            role="employee"
+        )
 
-    db.session.add_all(relationships)
-    db.session.add_all(feedback_entries)
-    db.session.commit()
+        # --- Categories ---
+        print("📂 Creating categories...")
+        cat1 = Category(name="Engineering", description="Technical documentation and development guides")
+        cat2 = Category(name="Product", description="Product specifications and roadmaps")
+        cat3 = Category(name="Marketing", description="Marketing strategies and campaigns")
+        cat4 = Category(name="Sales", description="Sales processes and customer guides")
+        cat5 = Category(name="HR", description="HR policies and employee resources")
+        cat6 = Category(name="All Documents", description="Complete company knowledge base")
 
-    print("✅ Database seeded successfully!")
-    print(f"📊 Created: 3 users, 3 categories, 3 articles, 6 tags, 8 tag relationships, 3 feedback entries")
-    
-    # Display sample data verification
-    print("\n📝 Sample Article with Tags:")
-    sample_article = Article.query.first()
-    print(f"Article: {sample_article.title}")
-    print(f"Tags: {[tag.name for tag in sample_article.tags]}")
-    
-    print("\n🏷️ All Tags:")
-    tags = Tag.query.all()
-    for tag in tags:
-        article_count = Article.query.join(ArticleTag).filter(ArticleTag.tag_id == tag.id).count()
-        print(f"- {tag.name} ({article_count} articles)")
+        # Add users and categories
+        db.session.add_all([user1, user2, user3, user4, cat1, cat2, cat3, cat4, cat5, cat6])
+        db.session.commit()
+
+        # --- Articles ---
+        print("📝 Creating articles...")
+        
+        # Engineering
+        eng1 = Article(
+            title="Getting Started with Our Tech Stack",
+            content="Learn about our technology stack including React, Flask, and PostgreSQL. This guide covers everything you need to know to start developing with our stack.",
+            author_id=user1.id,
+            category_id=cat1.id
+        )
+
+        eng2 = Article(
+            title="API Documentation v2.1",
+            content="Complete REST API documentation with authentication and endpoints. Learn how to integrate with our API services.",
+            author_id=user2.id,
+            category_id=cat1.id
+        )
+
+        eng3 = Article(
+            title="Database Schema Guide",
+            content="Database schema documentation and relationships between tables. Understand our data structure and relationships.",
+            author_id=user1.id,
+            category_id=cat1.id
+        )
+
+        # Product
+        prod1 = Article(
+            title="Product Roadmap Q1 2024",
+            content="Quarterly product roadmap with features and timelines. See what's coming next in our product development.",
+            author_id=user2.id,
+            category_id=cat2.id
+        )
+
+        prod2 = Article(
+            title="Feature Specification: Smart Search",
+            content="AI-powered search feature specification and requirements. Learn about our new intelligent search capabilities.",
+            author_id=user1.id,
+            category_id=cat2.id
+        )
+
+        # Marketing
+        marketing1 = Article(
+            title="Brand Guidelines v3.0",
+            content="Company brand guidelines including colors, fonts, and voice. Maintain consistent branding across all materials.",
+            author_id=user4.id,
+            category_id=cat3.id
+        )
+
+        marketing2 = Article(
+            title="Q1 Marketing Campaign Plan",
+            content="Marketing campaign plan with goals, channels, and budget. Execute successful marketing campaigns with this guide.",
+            author_id=user4.id,
+            category_id=cat3.id
+        )
+
+        # Sales
+        sales1 = Article(
+            title="Sales Playbook: Enterprise Accounts",
+            content="Enterprise sales playbook with processes and value propositions. Close more enterprise deals with proven strategies.",
+            author_id=user3.id,
+            category_id=cat4.id
+        )
+
+        # HR
+        hr1 = Article(
+            title="Employee Onboarding Checklist",
+            content="Complete onboarding checklist for new employees. Ensure smooth onboarding experiences for all new hires.",
+            author_id=user3.id,
+            category_id=cat5.id
+        )
+
+        hr2 = Article(
+            title="Remote Work Policy",
+            content="Company remote work policy and guidelines. Understand our remote work expectations and best practices.",
+            author_id=user1.id,
+            category_id=cat5.id
+        )
+
+        # Add all articles
+        all_articles = [eng1, eng2, eng3, prod1, prod2, marketing1, marketing2, sales1, hr1, hr2]
+        db.session.add_all(all_articles)
+        db.session.commit()
+
+        # --- Tags ---
+        print("🏷️ Creating tags...")
+        tags_data = [
+            "getting-started", "api", "documentation", "database", 
+            "roadmap", "feature", "brand", "campaign", "sales", "onboarding",
+            "remote-work", "policy", "technical", "guide", "best-practices"
+        ]
+        
+        tags = []
+        for tag_name in tags_data:
+            tag = Tag(name=tag_name)
+            tags.append(tag)
+        
+        db.session.add_all(tags)
+        db.session.commit()
+
+        # --- Article-Tag Relationships ---
+        print("🔗 Creating article-tag relationships...")
+        relationships = [
+            # Engineering articles
+            ArticleTag(article_id=eng1.id, tag_id=1),  # getting-started
+            ArticleTag(article_id=eng1.id, tag_id=13), # technical
+            ArticleTag(article_id=eng1.id, tag_id=14), # guide
+            
+            ArticleTag(article_id=eng2.id, tag_id=2),  # api
+            ArticleTag(article_id=eng2.id, tag_id=3),  # documentation
+            ArticleTag(article_id=eng2.id, tag_id=13), # technical
+            
+            ArticleTag(article_id=eng3.id, tag_id=4),  # database
+            ArticleTag(article_id=eng3.id, tag_id=3),  # documentation
+            ArticleTag(article_id=eng3.id, tag_id=14), # guide
+            
+            # Product articles
+            ArticleTag(article_id=prod1.id, tag_id=5), # roadmap
+            ArticleTag(article_id=prod2.id, tag_id=6), # feature
+            
+            # Marketing articles  
+            ArticleTag(article_id=marketing1.id, tag_id=7), # brand
+            ArticleTag(article_id=marketing1.id, tag_id=3), # documentation
+            ArticleTag(article_id=marketing2.id, tag_id=8), # campaign
+            
+            # Sales articles
+            ArticleTag(article_id=sales1.id, tag_id=9), # sales
+            ArticleTag(article_id=sales1.id, tag_id=14), # guide
+            
+            # HR articles
+            ArticleTag(article_id=hr1.id, tag_id=10), # onboarding
+            ArticleTag(article_id=hr1.id, tag_id=14), # guide
+            ArticleTag(article_id=hr2.id, tag_id=11), # remote-work
+            ArticleTag(article_id=hr2.id, tag_id=12), # policy
+        ]
+
+        # --- Feedback ---
+        print("💬 Creating feedback...")
+        feedback_entries = [
+            Feedback(
+                article_id=1,
+                user_id=3,
+                helpfulness_score=5,
+                comment="Very helpful for new developers!"
+            ),
+            Feedback(
+                article_id=9,
+                user_id=4,
+                helpfulness_score=4,
+                comment="Great onboarding checklist."
+            )
+        ]
+
+        db.session.add_all(relationships)
+        db.session.add_all(feedback_entries)
+        db.session.commit()
+
+        print("✅ Database seeded successfully!")
+        print(f"📊 Created: 4 users, 6 categories, {len(all_articles)} articles, {len(tags)} tags")
+        
+        # Display sample data verification
+        print("\n📝 Articles by Category:")
+        categories = Category.query.all()
+        for category in categories:
+            article_count = Article.query.filter_by(category_id=category.id).count()
+            print(f"- {category.name}: {article_count} articles")
+        
+        print("\n🏷️ Sample Tags:")
+        for tag in tags[:5]:
+            article_count = Article.query.join(ArticleTag).filter(ArticleTag.tag_id == tag.id).count()
+            print(f"- #{tag.name} ({article_count} articles)")
+
+if __name__ == "__main__":
+    seed_database()
