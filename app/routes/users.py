@@ -2,10 +2,114 @@ from flask import Blueprint, jsonify, request
 from app.models import User, Article
 from app import db
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity  # NEW
 
 users_bp = Blueprint('users', __name__)
 
-# GET all users (admin only - add auth later)
+# NEW: Firebase sync endpoint
+@users_bp.route('/firebase-sync', methods=['POST'])
+def sync_firebase_user():
+    try:
+        data = request.get_json()
+        
+        # Required fields from Firebase
+        firebase_uid = data.get('firebase_uid')
+        email = data.get('email')
+        username = data.get('username')
+        
+        if not firebase_uid or not email:
+            return jsonify({'error': 'Firebase UID and email are required'}), 400
+        
+        # Check if user already exists by Firebase UID
+        user = User.query.filter_by(firebase_uid=firebase_uid).first()
+        
+        if user:
+            # User exists, return their data
+            access_token = create_access_token(identity=user.id)
+            return jsonify({
+                'message': 'User synced successfully',
+                'access_token': access_token,
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'role': user.role
+                }
+            }), 200
+        
+        # Check if user exists by email (for existing users)
+        user = User.query.filter_by(email=email).first()
+        if user:
+            # Link Firebase UID to existing user
+            user.firebase_uid = firebase_uid
+            db.session.commit()
+        else:
+            # Create new user from Firebase data
+            if not username:
+                # Generate username from email
+                username = email.split('@')[0]
+            
+            # Ensure username is unique
+            base_username = username
+            counter = 1
+            while User.query.filter_by(username=username).first():
+                username = f"{base_username}{counter}"
+                counter += 1
+            
+            new_user = User(
+                username=username,
+                email=email,
+                firebase_uid=firebase_uid,
+                password_hash='firebase_auth',  # Dummy value
+                role='employee'
+            )
+            db.session.add(new_user)
+            db.session.commit()
+            user = new_user
+        
+        # Create JWT token for your backend
+        access_token = create_access_token(identity=user.id)
+        
+        return jsonify({
+            'message': 'User synced successfully',
+            'access_token': access_token,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'role': user.role
+            }
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# NEW: Get user profile (protected)
+@users_bp.route('/profile', methods=['GET'])
+@jwt_required()
+def get_profile():
+    try:
+        current_user_id = get_jwt_identity()
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
+        return jsonify({
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'role': user.role,
+                'firebase_uid': user.firebase_uid
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# GET all users (admin only)
 @users_bp.route('/users', methods=['GET'])
 def get_users():
     try:
@@ -54,7 +158,7 @@ def get_user(user_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# POST register new user
+# POST register new user (keep for non-Firebase registration)
 @users_bp.route('/register', methods=['POST'])
 def register_user():
     try:
@@ -76,7 +180,7 @@ def register_user():
             username=data['username'],
             email=data['email'],
             password_hash=generate_password_hash(data['password']),
-            role=data.get('role', 'viewer')  # Default to viewer
+            role=data.get('role', 'employee')
         )
         
         db.session.add(new_user)
@@ -96,7 +200,7 @@ def register_user():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-# POST login user (basic version - add JWT later)
+# POST login user (keep for non-Firebase login)
 @users_bp.route('/login', methods=['POST'])
 def login_user():
     try:
@@ -110,9 +214,12 @@ def login_user():
         if not user or not check_password_hash(user.password_hash, data['password']):
             return jsonify({'error': 'Invalid username or password'}), 401
         
-        # Basic success response (add JWT token here later)
+        # Create JWT token
+        access_token = create_access_token(identity=user.id)
+        
         return jsonify({
             'message': 'Login successful',
+            'access_token': access_token,
             'user': {
                 'id': user.id,
                 'username': user.username,
@@ -132,14 +239,12 @@ def update_user(user_id):
         data = request.get_json()
         
         if 'username' in data:
-            # Check if username is taken by another user
             existing_user = User.query.filter_by(username=data['username']).first()
             if existing_user and existing_user.id != user_id:
                 return jsonify({'error': 'Username already taken'}), 400
             user.username = data['username']
         
         if 'email' in data:
-            # Check if email is taken by another user
             existing_user = User.query.filter_by(email=data['email']).first()
             if existing_user and existing_user.id != user_id:
                 return jsonify({'error': 'Email already taken'}), 400
